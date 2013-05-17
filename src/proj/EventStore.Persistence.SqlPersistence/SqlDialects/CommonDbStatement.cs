@@ -146,7 +146,7 @@ namespace EventStore.Persistence.SqlPersistence.SqlDialects
 		{
 			var parameter = command.CreateParameter();
 			parameter.ParameterName = name;
-			this.SetParameterValue(parameter, value, null);
+			this.SetParameterValue(parameter, value, value is DateTime ? (DbType?)DbType.DateTime2 : null);
 
 			Logger.Verbose(Messages.BindingParameter, name, parameter.Value);
 			command.Parameters.Add(parameter);

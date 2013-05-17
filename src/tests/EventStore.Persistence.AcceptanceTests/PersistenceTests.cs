@@ -5,8 +5,10 @@ namespace EventStore.Persistence.AcceptanceTests
 {
 	using System;
 	using System.Collections.Generic;
+	using System.Diagnostics;
 	using System.Linq;
 	using System.Threading;
+	using System.Threading.Tasks;
 	using Diagnostics;
 	using Machine.Specifications;
 	using Persistence;
@@ -427,6 +429,60 @@ namespace EventStore.Persistence.AcceptanceTests
 			Catch.Exception(() => persistence.Commit(streamId.BuildAttempt())).ShouldBeOfType<ObjectDisposedException>();
 	}
 
+    [Subject("Persistence")]
+    public class when_saving_many_commits_on_many_threads : using_the_persistence_engine
+    {
+        const int NumberOfThreads = 20;
+        static int CommitsToPersistPerThread = 100;
+        static readonly List<Commit> Commits = new List<Commit>(); 
+
+        static readonly HashSet<Guid> committed = new HashSet<Guid>();
+
+        private Establish context = () =>
+                                        {
+                                            var dateTime = DateTime.UtcNow;
+                                            var stopwatch = new Stopwatch();
+                                            stopwatch.Start();
+
+                                            //Comment me out to see this test fail.
+                                            SystemTime.Resolver = (() => dateTime.AddTicks(stopwatch.ElapsedTicks));
+
+                                            var numberOfThreads = NumberOfThreads;
+                                            if (numberOfThreads == -1)
+                                            {
+                                                //Watch Out! This is alot of threads!
+                                                int temp;
+                                                ThreadPool.GetMaxThreads(out numberOfThreads, out temp);
+                                                CommitsToPersistPerThread = 100;
+                                            }
+                                            var tasks = new Task[numberOfThreads];
+                                            for (var h = 0; h < numberOfThreads; h++)
+                                            {
+                                                var task = Task.Factory.StartNew(() =>
+                                                                                     {
+                                                                                         var attempt = Guid.NewGuid().BuildAttempt();
+                                                                                         for (var i = 0; i < CommitsToPersistPerThread; i++)
+                                                                                         {
+                                                                                             persistence.Commit(attempt);
+                                                                                             attempt = attempt.BuildNextAttempt();
+                                                                                         }
+                                                                                     });
+                                                tasks[h] = task;
+                                            }
+                                            Task.WaitAll(tasks);
+                                            stopwatch.Stop();
+                                        };
+
+        Because of = () => 
+            Commits.AddRange(persistence.GetFrom(DateTime.MinValue).ToList());
+
+        It should_not_repeat_commitstamp = () =>
+                                               {
+                                                   var groups = Commits.GroupBy(c => c.CommitStamp);
+                                                   groups.All(x => x.Count() == 1).ShouldBeTrue();
+                                               };
+    }
+
 	public abstract class using_the_persistence_engine
 	{
 		protected static readonly PersistenceFactoryScanner FactoryScanner = new PersistenceFactoryScanner();
@@ -442,6 +498,7 @@ namespace EventStore.Persistence.AcceptanceTests
 
 		Cleanup everything = () =>
 		{
+            persistence.Purge();
 			persistence.Dispose();
 			persistence = null;
 			streamId = Guid.NewGuid();

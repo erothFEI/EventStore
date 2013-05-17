@@ -13,7 +13,33 @@
 	using Serialization;
 
 	public static class ExtensionMethods
-	{
+    {
+        public static BsonDocument AsBsonDocument(this DateTime dateTime)
+        {
+            var document = new BsonDocument();
+            using (var writer = new BsonDocumentWriter(document, new BsonDocumentWriterSettings()))
+            {
+                var dateTimeSerializer = new DateTimeSerializer();
+                dateTimeSerializer.Serialize(writer, typeof(DateTime), dateTime,
+                                             new DateTimeSerializationOptions(DateTimeKind.Utc, BsonType.Document));
+
+            }
+            return document;
+        }
+
+        public static DateTime AsPreciseDateTime(this BsonValue bsonValue)
+        {
+            var document = bsonValue.AsBsonDocument;
+            using (var reader = new BsonDocumentReader(document, new BsonDocumentReaderSettings()))
+            {
+                var dateTimeSerializer = new DateTimeSerializer();
+                var result = dateTimeSerializer.Deserialize(reader, typeof(DateTime),
+                                                            new DateTimeSerializationOptions(DateTimeKind.Utc,
+                                                                                             BsonType.Document));
+                return (DateTime)result;
+            }
+        }
+
         public static Dictionary<Tkey,Tvalue> AsDictionary<Tkey,Tvalue>(this BsonValue bsonValue)
         {
             
@@ -33,7 +59,7 @@
 			{
 				{ "_id", new BsonDocument { { "StreamId", commit.StreamId }, { "CommitSequence", commit.CommitSequence } } },
 				{ "CommitId", commit.CommitId },
-				{ "CommitStamp", commit.CommitStamp },
+				{ "CommitStamp", commit.CommitStamp.AsBsonDocument() },
 				{ "Headers", BsonDocumentWrapper.Create(commit.Headers) },
 				{ "Events", new BsonArray(events) },
 				{ "Dispatched", false }
@@ -55,7 +81,7 @@
 		        streamRevision,
 		        doc["CommitId"].AsGuid,
 		        commitSequence,
-                doc["CommitStamp"].ToUniversalTime(),
+                doc["CommitStamp"].AsPreciseDateTime(),
                 doc["Headers"].AsDictionary<string,object>(),
 				events);
 		}
